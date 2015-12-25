@@ -15,6 +15,15 @@
 #define bufferSize 1024
 
 char currDir[100];
+int port = 1025;
+
+int getPort()
+{
+	port++;
+	if (port == 5000)
+		port = 1025;
+	return port;
+}
 
 void sendFile(int sockfd, char* filename)
 {
@@ -66,7 +75,7 @@ void recvFile(int sockfd, char* filename)
 		printf("Can not open file: %s.\n", filename);
 		return;
 	}
-	printf("fileLen:%ld\n", fileLen);
+	//printf("fileLen:%ld\n", fileLen);
 	memset(buffer, 0, bufferSize);
 	strcpy(buffer, "OK");
 	send(sockfd, buffer, bufferSize, 0);
@@ -150,69 +159,58 @@ int main(int argc, char** argv)
         return 0;
     }
 
-    int serverData, serverMsg;
+    int serverMsg;
     int port = atoi(argv[1]);
-    serverData = socket(AF_INET, SOCK_STREAM, 0);
     serverMsg = socket(AF_INET, SOCK_STREAM, 0); 
-    int opt = 1, opt2 = 1;
-    setsockopt(serverData , SOL_SOCKET , SO_REUSEADDR , &opt , sizeof(opt)); //socket重用
-    setsockopt(serverMsg , SOL_SOCKET , SO_REUSEADDR , &opt2 , sizeof(opt2));
-    if (serverData < 0 || serverMsg < 0)
+    int opt = 1;
+    setsockopt(serverMsg , SOL_SOCKET , SO_REUSEADDR , &opt , sizeof(opt));
+    if (serverMsg < 0)
     {
         perror("Initial socket fail");
         exit(1);
     }
 
-    sockaddr_in serverDataIn, serverMsgIn;
-    memset(&serverDataIn, 0, sizeof(serverDataIn));
-    serverDataIn.sin_family = AF_INET; //设置协议族
-    serverDataIn.sin_addr.s_addr = htonl(INADDR_ANY); //监听所有地址
-    serverDataIn.sin_port = htons(port);
+    sockaddr_in serverMsgIn;
     memset(&serverMsgIn, 0, sizeof(serverMsgIn));
     serverMsgIn.sin_family = AF_INET;
     serverMsgIn.sin_addr.s_addr = htonl(INADDR_ANY);
-    serverMsgIn.sin_port = htons(port+1);
-    if (bind(serverData, (struct sockaddr*) &serverDataIn, sizeof(serverDataIn)) < 0 ||
-        bind(serverMsg, (struct sockaddr*) &serverMsgIn, sizeof(serverMsgIn)) < 0)
+    serverMsgIn.sin_port = htons(port);
+    if (bind(serverMsg, (struct sockaddr*) &serverMsgIn, sizeof(serverMsgIn)) < 0)
     {
         perror("Bind fail");
         exit(1);
     }
   
-    unsigned int lengthData = sizeof(serverData);
     unsigned int lengthMsg = sizeof(serverMsg);
-    if (getsockname(serverData, (struct sockaddr*) &serverDataIn, &lengthData) < 0 ||
-        getsockname(serverMsg, (struct sockaddr*) &serverMsgIn, &lengthMsg) < 0)
+    if (getsockname(serverMsg, (struct sockaddr*) &serverMsgIn, &lengthMsg) < 0)
     {
         perror("Get socket name fail");
         exit(1);
     }
 
-    printf("Socket port: %d %d\n",ntohs(serverDataIn.sin_port),ntohs(serverMsgIn.sin_port));
-
-    if (listen(serverData, 20) < 0 || listen(serverMsg, 20) < 0)
+    if (listen(serverMsg, 20) < 0)
     {
         perror("Listen fail");
         exit(1);
     }
 
     pid_t child; //client子进程
-    char command[10]; //client命令
-    char args[50]; //命令参数
-    int datasock, msgsock;  
+    char command[10] = {0}; //client命令
+    char args[50] = {0}; //命令参数
+    int msgsock;  
     memset(currDir, 0, sizeof(currDir));
     getcwd(currDir, sizeof(currDir)); //获得当前目录
     printf("Server starts.\n");
 
     while(1)
     {
-        datasock = accept(serverData, NULL, NULL);  //数据通道连接
         msgsock = accept(serverMsg, NULL, NULL); //命令通道连接
-        if (datasock == -1 || msgsock == -1)
+        if (msgsock == -1)
         {
             perror("Accept error");
             break;
         }
+		int port = getPort();
         if ((child = fork()) == -1)
         {
             printf("Fork error.\n");
@@ -221,6 +219,43 @@ int main(int argc, char** argv)
         if (child == 0)
         {
             printf("Connection succeeded.\n");
+			int serverData, datasock;
+			int opt2 = 1;
+			recv(msgsock, command, sizeof(command), 0);
+			if (!strcmp(command, "PASV"))
+			{
+				serverData = socket(AF_INET, SOCK_STREAM, 0);
+    			setsockopt(serverData , SOL_SOCKET , SO_REUSEADDR , &opt2 , sizeof(opt2));
+				sockaddr_in serverDataIn;
+				memset(&serverDataIn, 0, sizeof(serverDataIn));
+    			serverDataIn.sin_family = AF_INET; //设置协议族
+    			serverDataIn.sin_addr.s_addr = htonl(INADDR_ANY); //监听所有地址
+				//int port = getPort();
+				//printf("port:%d\n", port);
+				serverDataIn.sin_port = htons(port);
+				if (bind(serverData, (struct sockaddr*) &serverDataIn, sizeof(serverDataIn)) < 0)
+    			{
+        			perror("Bind fail");
+        			exit(1);
+    			}
+				unsigned int lengthData = sizeof(serverData);
+				if (getsockname(serverData, (struct sockaddr*) &serverDataIn, &lengthData) < 0)
+				{
+					perror("Get socket name fail");
+					exit(1);
+				}
+				printf("Socket port: %d %d\n",ntohs(serverDataIn.sin_port),ntohs(serverMsgIn.sin_port));
+				if (listen(serverData, 20) < 0)
+				{
+					perror("Listen fail");
+					exit(1);
+				}
+				sprintf(args, "%d", port);
+				send(msgsock, args, strlen(args), 0);
+				datasock = accept(serverData, NULL, NULL);
+			}
+			else
+				exit(1);
             while(1)
             {
                 memset(command, 0, sizeof(command));
@@ -291,10 +326,10 @@ int main(int argc, char** argv)
             printf("Connection closed.\n");
             close(datasock);
             close(msgsock);
+			close(serverData);
             exit(1);
         }
     }
-    close(serverData);
     close(serverMsg);
     return 0;
 }

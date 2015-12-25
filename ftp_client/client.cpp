@@ -47,7 +47,7 @@ void sendFile(int sockfd, char* filename)
 		char sendLen[100] = {0}; 
 		sprintf(sendLen, "%ld", fileLen);
 		send(sockfd, sendLen, strlen(sendLen), 0);
-        printf("fileLen:%ld\n", fileLen);
+        //printf("fileLen:%ld\n", fileLen);
 		memset(buffer, 0, bufferSize);
 		recv(sockfd, buffer, bufferSize, 0);
 		memset(buffer, 0, bufferSize);
@@ -189,21 +189,30 @@ int main(int argc, char** argv)
     //connect to server
     sockaddr_in serverMsg, serverData;
     
-    serverData.sin_family = AF_INET;
-    serverData.sin_port = htons(atoi(argv[2]));
-    inet_pton(AF_INET, argv[1], &serverData.sin_addr);
     serverMsg.sin_family = AF_INET;
-    serverMsg.sin_port = htons(atoi(argv[2]) + 1);
+    serverMsg.sin_port = htons(atoi(argv[2]));
     inet_pton(AF_INET, argv[1], &serverMsg.sin_addr);
-    if(connect(clientMsg, (sockaddr*)&serverMsg, sizeof(serverMsg)) < 0 ||
-       connect(clientData, (sockaddr*)&serverData, sizeof(serverData)) < 0)
+    if(connect(clientMsg, (sockaddr*)&serverMsg, sizeof(serverMsg)) < 0)
     {
         perror("Can not connect server.");
         exit(3);
     }
     //parse command
-    char command[10];
-    char args[50];
+    char command[10] = {0};
+    char args[50] = {0};
+	strcpy(command, "PASV");
+	send(clientMsg, command, strlen(command), 0);
+	recv(clientMsg, args, 50, 0);
+	int port = atoi(args);
+	serverData.sin_family = AF_INET;
+    serverData.sin_port = htons(port);
+    inet_pton(AF_INET, argv[1], &serverData.sin_addr);
+	if(connect(clientData, (sockaddr*)&serverData, sizeof(serverData)) < 0)
+    {
+        perror("Can not connect server.");
+        exit(3);
+    }
+
     while(1)
     {
 		memset(command, 0, sizeof(command));
